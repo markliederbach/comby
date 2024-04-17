@@ -2,9 +2,9 @@ before:
   hooks:
     - go mod tidy
 builds:
-  - id: qrkdns
+  - id: comby
     main: ./main.go
-    binary: qrkdns
+    binary: comby
     env:
       - CGO_ENABLED=0
     targets:
