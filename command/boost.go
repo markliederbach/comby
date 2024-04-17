@@ -10,20 +10,24 @@ import (
 )
 
 const (
-	BoostFlagUsers       = "user"
-	BoostFlagMaxBoosts   = "max-boosts"
-	BoostFlagServer      = "server"
-	BoostFlagClientID    = "client-id"
-	BoostFlagAccessToken = "access-token"
-	BoostFlagSince       = "since"
+	BoostFlagUsers          = "user"
+	BoostFlagMaxBoosts      = "max-boosts"
+	BoostFlagServer         = "server"
+	BoostFlagClientID       = "client-id"
+	BoostFlagAccessToken    = "access-token"
+	BoostFlagSince          = "since"
+	BoostFlagExcludePattern = "exclude-pattern"
+	BoostFlagExcludeOptions = "exclude"
 )
 
 type BoostCommandArgs struct {
-	Users          []string
-	MastodonServer string
-	AccessToken    string
-	MaxBoosts      int64
-	Since          time.Duration
+	Users           []string
+	MastodonServer  string
+	AccessToken     string
+	MaxBoosts       int
+	Since           time.Duration
+	ExcludePatterns []string
+	ExcludeOptions  []string
 }
 
 type BoostCommand struct{}
@@ -34,11 +38,13 @@ func NewBoostCommand() *BoostCommand {
 
 func NewBoostCommandArgs(c *cli.Command) *BoostCommandArgs {
 	return &BoostCommandArgs{
-		Users:          c.StringSlice(BoostFlagUsers),
-		MastodonServer: c.String(BoostFlagServer),
-		AccessToken:    c.String(BoostFlagAccessToken),
-		MaxBoosts:      c.Int(BoostFlagMaxBoosts),
-		Since:          c.Duration(BoostFlagSince),
+		Users:           c.StringSlice(BoostFlagUsers),
+		MastodonServer:  c.String(BoostFlagServer),
+		AccessToken:     c.String(BoostFlagAccessToken),
+		MaxBoosts:       int(c.Int(BoostFlagMaxBoosts)),
+		Since:           c.Duration(BoostFlagSince),
+		ExcludePatterns: c.StringSlice(BoostFlagExcludePattern),
+		ExcludeOptions:  c.StringSlice(BoostFlagExcludeOptions),
 	}
 }
 
@@ -83,6 +89,21 @@ func (cmd *BoostCommand) ToCliCommand() *cli.Command {
 				DefaultText: "24h",
 				Sources:     cli.EnvVars("BOOST_SINCE"),
 			},
+			&cli.StringSliceFlag{
+				Name:    BoostFlagExcludePattern,
+				Usage:   "Exclude statuses matching these patterns",
+				Sources: cli.EnvVars("BOOST_EXCLUDE_PATTERNS"),
+			},
+			&cli.StringSliceFlag{
+				Name:  BoostFlagExcludeOptions,
+				Usage: "Options to exclude statuses",
+				Value: []string{
+					"exclude_replies",
+					"exclude_boosts",
+				},
+				DefaultText: "exclude_replies,exclude_boosts",
+				Sources:     cli.EnvVars("BOOST_EXCLUDE_OPTIONS"),
+			},
 		},
 		Action: func(ctx context.Context, c *cli.Command) error {
 			args := NewBoostCommandArgs(c)
@@ -94,12 +115,7 @@ func (cmd *BoostCommand) ToCliCommand() *cli.Command {
 				return err
 			}
 			statusesToBoost := []client.Status{}
-
-			filters := []client.ExcludeFunc{
-				// mastodonClient.ExcludeRepliesToOwnStatuses(),
-				mastodonClient.ExcludeStatusOlderThan(args.Since),
-			}
-
+			filters := GetFilters(mastodonClient, args)
 			for _, user := range args.Users {
 				account, err := mastodonClient.GetAccount(ctx, user)
 				if err != nil {
@@ -110,15 +126,46 @@ func (cmd *BoostCommand) ToCliCommand() *cli.Command {
 				if err != nil {
 					return err
 				}
-				// TODO: filter statuses
-				// 		- exclude replies to own statuses
-				// 		- exclude reblogs
 				statusesToBoost = append(statusesToBoost, statuses...)
 			}
+			boostedStatuses := 0
 			for _, status := range statusesToBoost {
-				fmt.Printf("Boosting status %s\n", status.Id)
+				if boostedStatuses >= args.MaxBoosts {
+					fmt.Printf("Reached maximum number of boosts (%d)\n", args.MaxBoosts)
+					break
+				}
+				fmt.Printf("Boosting status %s\n", status.Url)
+				boostedStatus, err := mastodonClient.BoostStatus(ctx, status)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("Boosted status URL: %s\n", boostedStatus.Url)
+				boostedStatuses++
 			}
+			fmt.Printf("Boosted %d statuses\n", boostedStatuses)
 			return nil
 		},
 	}
+}
+
+func GetFilters(mastodonClient *client.MastodonClientImpl, args *BoostCommandArgs) []client.ExcludeFunc {
+	filters := []client.ExcludeFunc{
+		mastodonClient.ExcludeStatusOlderThan(args.Since),
+		mastodonClient.ExcludeAlreadyBoosted(),
+		mastodonClient.ExcludeMatchingRegex(args.ExcludePatterns...),
+	}
+
+	for _, option := range args.ExcludeOptions {
+		switch option {
+		case "exclude_replies":
+			filters = append(filters, mastodonClient.ExcludeAllReplies())
+		case "exclude_replies_to_self":
+			filters = append(filters, mastodonClient.ExcludeRepliesToOwnStatuses())
+		case "exclude_boosts":
+			filters = append(filters, mastodonClient.ExcludeBoosts())
+		default:
+			fmt.Printf("Unknown exclude option: %s\n", option)
+		}
+	}
+	return filters
 }

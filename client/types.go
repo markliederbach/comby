@@ -24,10 +24,13 @@ type Account struct {
 
 type Status struct {
 	Id                 string  `json:"id"`
+	Url                string  `json:"url"`
 	Account            Account `json:"account"`
 	CreatedAt          string  `json:"created_at"`
 	Content            string  `json:"content"`
 	Visibility         string  `json:"visibility"`
+	RebloggedByMe      bool    `json:"reblogged"`
+	Reblog             *Status `json:"reblog"`
 	InReplyToAccountId string  `json:"in_reply_to_account_id"`
 }
 
