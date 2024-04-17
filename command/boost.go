@@ -3,9 +3,11 @@ package command
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/markliederbach/comby/client"
+	"github.com/markliederbach/comby/util"
 	"github.com/urfave/cli/v3"
 )
 
@@ -18,6 +20,7 @@ const (
 	BoostFlagSince          = "since"
 	BoostFlagExcludePattern = "exclude-pattern"
 	BoostFlagExcludeOptions = "exclude"
+	BoostConfirm            = "confirm"
 )
 
 type BoostCommandArgs struct {
@@ -28,6 +31,7 @@ type BoostCommandArgs struct {
 	Since           time.Duration
 	ExcludePatterns []string
 	ExcludeOptions  []string
+	Confirm         bool
 }
 
 type BoostCommand struct{}
@@ -45,6 +49,7 @@ func NewBoostCommandArgs(c *cli.Command) *BoostCommandArgs {
 		Since:           c.Duration(BoostFlagSince),
 		ExcludePatterns: c.StringSlice(BoostFlagExcludePattern),
 		ExcludeOptions:  c.StringSlice(BoostFlagExcludeOptions),
+		Confirm:         c.Bool(BoostConfirm),
 	}
 }
 
@@ -104,6 +109,14 @@ func (cmd *BoostCommand) ToCliCommand() *cli.Command {
 				DefaultText: "exclude_replies,exclude_boosts",
 				Sources:     cli.EnvVars("BOOST_EXCLUDE_OPTIONS"),
 			},
+			&cli.BoolFlag{
+				Name:        BoostConfirm,
+				Aliases:     []string{"c"},
+				Usage:       "Confirm before boosting each status",
+				Value:       false,
+				DefaultText: "false",
+				Sources:     cli.EnvVars("BOOST_CONFIRM"),
+			},
 		},
 		Action: func(ctx context.Context, c *cli.Command) error {
 			args := NewBoostCommandArgs(c)
@@ -133,6 +146,21 @@ func (cmd *BoostCommand) ToCliCommand() *cli.Command {
 				if boostedStatuses >= args.MaxBoosts {
 					fmt.Printf("Reached maximum number of boosts (%d)\n", args.MaxBoosts)
 					break
+				}
+				if args.Confirm {
+					plainTextContent, err := util.HTMLToPlainText(status.Content)
+					if err != nil {
+						return err
+					}
+					fmt.Printf("\n\n%s\n\n\n", plainTextContent)
+					fmt.Println(status.Url)
+					fmt.Print("Boost status? (y/n): ")
+					var confirm string
+					fmt.Scanln(&confirm)
+					if strings.ToLower(confirm) != "y" {
+						fmt.Printf("Skipping status %s\n", status.Url)
+						continue
+					}
 				}
 				fmt.Printf("Boosting status %s\n", status.Url)
 				boostedStatus, err := mastodonClient.BoostStatus(ctx, status)
