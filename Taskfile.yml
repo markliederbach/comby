@@ -34,7 +34,7 @@ tasks:
         new="v$major.$minor.$patch"
         echo "[Current] v$current -> [New] $new"
         git tag -l | xargs git tag -d > /dev/null
-        git fetch --tags
+        git fetch --tags > /dev/null
         git tag $new && git push origin $new
     preconditions:
       - sh: "[[ $(git rev-parse --abbrev-ref HEAD) == 'main' ]]"
